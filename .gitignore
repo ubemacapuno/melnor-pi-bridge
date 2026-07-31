@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+backend/uv.lock
+*.egg-info
+PLAN.md
+plan/
+
+# Virtual environments
+.venv
+
+# Runtime state (the scheduler's source of truth), not source code
+backend/data/

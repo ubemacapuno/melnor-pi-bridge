@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Wrapper for the valve control scripts so you can type, e.g.:
+#
+#     ./m schedule
+#     ./m state
+#     ./m on 1 5
+#     ./m stop 1
+#     ./m set-schedule 1 thu 19:00 5
+#
+# instead of "uv run python scripts/control.py ..." every time.
+#
+# It cd's into this script's own folder first, so it works no matter
+# where you run it from.
+cd "$(dirname "$0")" || exit 1
+exec uv run python scripts/control.py "$@"
