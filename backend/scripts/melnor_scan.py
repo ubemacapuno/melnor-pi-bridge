@@ -1,13 +1,5 @@
 """
-A small Bluetooth scanner for Melnor devices.
-
-The melnor-bluetooth library ships its own scanner, but it was written
-for an old version of the `bleak` Bluetooth library and crashes on the
-version installed here (it calls a method that no longer exists).
-
-This file reimplements just the scanning part using the current bleak
-API. Everything else (connecting, reading, controlling valves) still
-uses the melnor-bluetooth library as normal.
+Bluetooth scanner to detect the Melnor device.
 """
 
 import asyncio
@@ -16,7 +8,6 @@ from bleak import BleakScanner
 
 # Melnor timers advertise using Bluetooth "manufacturer ID" 13.
 # We use this to tell Melnor devices apart from every other BLE gadget
-# (headphones, watches, etc.) in range.
 MELNOR_MANUFACTURER_ID = 13
 
 
@@ -54,7 +45,7 @@ async def scan_for_melnor(timeout_seconds=15, on_found=None, stop_on_first=True)
         # Wait until we find one, or give up after timeout_seconds.
         await asyncio.wait_for(first_found.wait(), timeout=timeout_seconds)
     except asyncio.TimeoutError:
-        # Nothing showed up in time; found stays whatever we collected.
+        # Nothing showed up in time, found stays whatever we collected.
         pass
     await scanner.stop()
 
