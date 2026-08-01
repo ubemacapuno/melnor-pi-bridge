@@ -1,0 +1,10 @@
+# npm packages -- reinstalled with `npm install`, never committed.
+node_modules
+
+# Vite build output -- regenerated with `npm run build`.
+dist
+
+# Local env overrides (e.g. VITE_API_TARGET pointing dev at the Pi). Machine-
+# specific, so it's kept out of git.
+.env.local
+*.local
