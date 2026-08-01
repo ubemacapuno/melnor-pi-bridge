@@ -41,6 +41,16 @@ export default function AddScheduleForm({
       return;
     }
 
+    if (!time) {
+      setError("Pick a start time.");
+      return;
+    }
+
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_MINUTES) {
+      setError(`Minutes must be a whole number from 1 to ${MAX_MINUTES}.`);
+      return;
+    }
+
     const orderedDays = DAY_ORDER.filter((d) => days.includes(d));
 
     setSubmitting(true);

@@ -52,8 +52,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const message =
       typeof detail === "string"
         ? detail // detail is a plain string (our own 409/422/503)
-        : detail
-          ? JSON.stringify(detail) // Pydantic validation errors, detail is a list
+        : Array.isArray(detail)
+          ? detail.map((d) => d?.msg ?? String(d)).join("; ") // Pydantic errors: pull out the human-readable msg
           : res.statusText || "Request failed"; // no detail, generic fallback
     const err = new Error(message) as ApiError;
     err.status = res.status;
