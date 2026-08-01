@@ -171,6 +171,7 @@ async def set_zone_schedule(
 
 # Brain schedules cap watering at 240 minutes (4 h). This is stricter than the
 # device's 360-min manual limit, a scheduled run should never exceed 4 hours.
+# If changing this, also update MAX_MINUTES in AddScheduleForm.tsx
 _MAX_SCHEDULE_MINUTES = 240
 
 
