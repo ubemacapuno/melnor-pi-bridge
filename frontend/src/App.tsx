@@ -13,7 +13,14 @@ import ManualWatering from "./components/ManualWatering";
 import ScheduleList from "./components/ScheduleList";
 import AddScheduleForm from "./components/AddScheduleForm";
 
-type Notice = { type: "error" | "info"; text: string };
+type Notice = {
+  type: "error" | "info";
+  text: string;
+  at: Date;
+};
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const DEVICE_SETTLE_MS = 3000;
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -28,6 +35,15 @@ export default function App() {
     loadSchedules();
   }, []);
 
+  // show a notice with the current time
+  function notify(type: Notice["type"], text: string) {
+    setNotice({
+      type,
+      text,
+      at: new Date(),
+    });
+  }
+
   function loadHealth() {
     api
       .getHealth()
@@ -39,10 +55,7 @@ export default function App() {
     try {
       setSchedules(await api.getSchedules());
     } catch (err) {
-      setNotice({
-        type: "error",
-        text: `Couldn't load schedules: ${errorMessage(err)}`,
-      });
+      notify("error", `Couldn't load schedules: ${errorMessage(err)}`);
     }
   }
 
@@ -57,35 +70,38 @@ export default function App() {
       const result = await action();
       if (onSuccess) onSuccess(result);
     } catch (err) {
-      setNotice({ type: "error", text: errorMessage(err) });
+      notify("error", errorMessage(err));
     } finally {
       setBleBusy(false);
     }
   }
 
+  // store a fresh device read into the status cards
+  function applyState(state: DeviceState) {
+    setDeviceState(state);
+    setStatusUpdatedAt(new Date());
+  }
+
   function refreshStatus() {
-    runBle(api.getState, (state) => {
-      setDeviceState(state);
-      setStatusUpdatedAt(new Date());
-    });
+    runBle(api.getState, applyState);
   }
 
   function startZone(zone: number, minutes: number) {
-    runBle(
-      () => api.waterZone(zone, minutes),
-      () =>
-        setNotice({
-          type: "info",
-          text: `Zone ${zone} watering for ${minutes} min. Press Refresh to confirm.`,
-        }),
-    );
+    runBle(async () => {
+      await api.waterZone(zone, minutes);
+      notify("info", `Zone ${zone} watering for ${minutes} min.`);
+      await delay(DEVICE_SETTLE_MS); // let the device populate its countdown before we re-read
+      return api.getState();
+    }, applyState);
   }
 
   function stopZone(zone: number) {
-    runBle(
-      () => api.offZone(zone),
-      () => setNotice({ type: "info", text: `Zone ${zone} turned off.` }),
-    );
+    runBle(async () => {
+      await api.offZone(zone);
+      notify("info", `Zone ${zone} turned off.`);
+      await delay(DEVICE_SETTLE_MS);
+      return api.getState();
+    }, applyState);
   }
 
   // add/deleteSchedule doesn't require bluetooth
@@ -102,7 +118,7 @@ export default function App() {
       await loadSchedules();
       loadHealth();
     } catch (err) {
-      setNotice({ type: "error", text: `Delete failed: ${errorMessage(err)}` });
+      notify("error", `Delete failed: ${errorMessage(err)}`);
     }
   }
 
@@ -118,13 +134,16 @@ export default function App() {
         {notice && (
           <div
             className={
-              "rounded-lg px-3 py-2 text-sm " +
+              "flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm " +
               (notice.type === "error"
                 ? "bg-red-950 text-red-200 border border-red-900"
                 : "bg-sky-950 text-sky-200 border border-sky-900")
             }
           >
-            {notice.text}
+            <span>{notice.text}</span>
+            <span className="shrink-0 text-xs opacity-70">
+              {notice.at.toLocaleTimeString()}
+            </span>
           </div>
         )}
 

@@ -20,6 +20,7 @@ export interface ZoneState {
   watering: boolean;
   watering_source?: string;
   remaining_minutes?: number;
+  ends_at?: string; // ISO local time, e.g. "2026-08-09T11:45:00"
   schedule: { enabled: boolean; next_run?: string };
 }
 

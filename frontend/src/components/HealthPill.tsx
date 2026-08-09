@@ -1,7 +1,7 @@
 import { type Health } from "../api";
 
 // status dot and text in the header
-// data from /api/health (no BLE)
+// data from /api/health (not a bluetooth endpoint)
 // green = API up and we can see the scheduler;
 // red = couldn't reach the API
 export default function HealthPill({ health }: { health: Health | null }) {

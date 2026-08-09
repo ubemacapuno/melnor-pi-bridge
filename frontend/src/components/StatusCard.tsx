@@ -12,12 +12,17 @@ function ZoneStatus({ n, zone }: { n: number; zone: ZoneState | undefined }) {
     <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
       <div className="text-xs font-medium text-slate-400">Zone {n}</div>
       {watering ? (
-        <div className="mt-1 text-emerald-400">
+        <div className="flex flex-col gap-1 mt-1 text-emerald-400">
           💧 Watering
           {zone?.watering_source ? ` (${zone.watering_source})` : ""}
           {typeof zone?.remaining_minutes === "number"
             ? ` · ${zone.remaining_minutes}m left`
             : ""}
+          {zone?.ends_at && (
+            <div className="text-xs text-slate-500">
+              Ends at {new Date(zone.ends_at).toLocaleTimeString()}
+            </div>
+          )}
         </div>
       ) : (
         <div className="mt-1 text-slate-300">Idle</div>
