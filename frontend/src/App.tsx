@@ -19,6 +19,8 @@ type Notice = {
   at: Date;
 };
 
+// a start needs a moment to populate its countdown register,
+// so use set timeout before re-reading it
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const DEVICE_SETTLE_MS = 3000;
 
@@ -82,6 +84,14 @@ export default function App() {
     setStatusUpdatedAt(new Date());
   }
 
+  async function readStatus() {
+    try {
+      applyState(await api.getState());
+    } catch (err) {
+      console.warn("post-command status read failed:", err);
+    }
+  }
+
   function refreshStatus() {
     runBle(api.getState, applyState);
   }
@@ -90,18 +100,17 @@ export default function App() {
     runBle(async () => {
       await api.waterZone(zone, minutes);
       notify("info", `Zone ${zone} watering for ${minutes} min.`);
-      await delay(DEVICE_SETTLE_MS); // let the device populate its countdown before we re-read
-      return api.getState();
-    }, applyState);
+      await delay(DEVICE_SETTLE_MS); // let the countdown register fill first
+      await readStatus();
+    });
   }
 
   function stopZone(zone: number) {
     runBle(async () => {
       await api.offZone(zone);
       notify("info", `Zone ${zone} turned off.`);
-      await delay(DEVICE_SETTLE_MS);
-      return api.getState();
-    }, applyState);
+      await readStatus();
+    });
   }
 
   // add/deleteSchedule doesn't require bluetooth
