@@ -27,7 +27,7 @@ function ZoneStatus({ n, zone }: { n: number; zone: ZoneState | undefined }) {
       ) : (
         <div className="mt-1 text-slate-300">Idle</div>
       )}
-      {/* This is the timer's OWN on-device schedule (separate from the brain
+      {/* This is the timer's OWN on-device schedule (separate from the Pi-side
           schedules below). Shown only if the device has one enabled. */}
       {schedule?.enabled && schedule.next_run && (
         <div className="mt-1 text-xs text-slate-500">

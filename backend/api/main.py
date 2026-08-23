@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # Relative imports: bring in our logic layer (melnor.py), the schedule store
-# (store.py), and the scheduler "brain" (scheduler.py).
+# (store.py), and the Pi-side scheduler (scheduler.py).
 from . import melnor, store, scheduler
 
 # Make OUR logs visible in the console. Everything in this app logs under the
@@ -161,7 +161,7 @@ async def set_zone_schedule(
             raise HTTPException(status_code=503, detail=str(error))
 
 
-# --- Pi-side schedule management ("the brain") --------------------------
+# --- Pi-side schedule management -----------------------------------------
 #
 # These endpoints manage the schedules.json store and re-arm the in-process
 # scheduler. They do NOT touch Bluetooth, they only edit the file and rebuild
@@ -169,7 +169,7 @@ async def set_zone_schedule(
 # directly on the event loop, which is the safe way to poke the scheduler.
 
 
-# Brain schedules cap watering at 240 minutes (4 h). This is stricter than the
+# Pi-side schedules cap watering at 240 minutes (4 h). This is stricter than the
 # device's 360-min manual limit, a scheduled run should never exceed 4 hours.
 # If changing this, also update MAX_MINUTES in AddScheduleForm.tsx
 _MAX_SCHEDULE_MINUTES = 240
