@@ -169,10 +169,11 @@ async def set_zone_schedule(
 # directly on the event loop, which is the safe way to poke the scheduler.
 
 
-# Pi-side schedules cap watering at 240 minutes (4 h). This is stricter than the
-# device's 360-min manual limit, a scheduled run should never exceed 4 hours.
+# Pi-side schedules cap watering at 360 minutes (6 h). That's also the device's
+# own limit for one manual run, which is what a schedule sends when it fires
+# (melnor.water_zone), so it can't go higher.
 # If changing this, also update MAX_MINUTES in AddScheduleForm.tsx
-_MAX_SCHEDULE_MINUTES = 240
+_MAX_SCHEDULE_MINUTES = 360
 
 
 class ScheduleCreate(BaseModel):

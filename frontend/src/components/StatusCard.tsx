@@ -134,7 +134,7 @@ function SourceTag({ source }: { source: StatusSource }) {
           : "Last known state saved on the Pi; press Refresh to read the timer"
       }
       className={
-        "ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide " +
+        "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide " +
         (isLive
           ? "bg-emerald-950 text-emerald-400 border border-emerald-900"
           : "bg-amber-950 text-amber-400 border border-amber-900")
@@ -200,7 +200,7 @@ export default function StatusCard({
           }
           aria-busy={isBusy}
         >
-          <div className="flex flex-wrap items-center text-sm text-slate-300">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-slate-300">
             <span>
               {state.name} · 🔋 {state.battery}%
               {updatedAt && (

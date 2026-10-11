@@ -160,7 +160,7 @@ phone and the Pi are in different timezones.
 ```
 
 - `zone` is `1`-`2`; `days` is any of `mon`-`sun`; `time` is 24-hour `HH:MM`
-  (local time); `minutes` is `1`-`240` (a scheduled run is capped at 4 hours).
+  (local time); `minutes` is `1`-`360` (a scheduled run is capped at 6 hours, the device's own limit).
   `is_enabled` is optional and defaults to `true` (`false` keeps the schedule saved
   but doesn't arm it). Bad values → `422`.
 - The response echoes the created schedule including a generated `id`; pass that

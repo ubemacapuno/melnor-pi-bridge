@@ -80,11 +80,11 @@ def test_empty_days_422(client):
 
 
 def test_minutes_over_cap_422(client):
-    assert client.post("/api/schedules", json={**VALID, "minutes": 241}).status_code == 422
+    assert client.post("/api/schedules", json={**VALID, "minutes": 361}).status_code == 422
 
 
 def test_minutes_at_cap_ok(client):
-    assert client.post("/api/schedules", json={**VALID, "minutes": 240}).status_code == 200
+    assert client.post("/api/schedules", json={**VALID, "minutes": 360}).status_code == 200
 
 
 def test_bad_zone_422(client):

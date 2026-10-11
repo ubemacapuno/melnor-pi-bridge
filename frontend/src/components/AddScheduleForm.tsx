@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { errorMessage, type Schedule, type ScheduleInput } from "../api";
 
-const MAX_MINUTES = 240; // matches the backend _MAX_SCHEDULE_MINUTES in main.py
+const MAX_MINUTES = 360; // matches the backend _MAX_SCHEDULE_MINUTES in main.py
 
 const DAYS: [string, string][] = [
   ["sun", "Su"],
