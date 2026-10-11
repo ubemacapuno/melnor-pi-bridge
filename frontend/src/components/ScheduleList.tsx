@@ -55,7 +55,7 @@ export default function ScheduleList({
               {" · "}
               {s.time} · {s.minutes}m
             </span>
-            {!s.enabled && (
+            {!s.is_enabled && (
               <span className="ml-2 text-xs text-amber-400">(paused)</span>
             )}
           </span>

@@ -54,6 +54,11 @@ async def scan_for_melnor(timeout_seconds=15, on_found=None, stop_on_first=True)
     except asyncio.TimeoutError:
         # Nothing showed up in time; found stays whatever we collected.
         pass
-    await scanner.stop()
+    finally:
+        # ALWAYS stop, even if this coroutine is cancelled mid-scan (a client
+        # disconnects, or shutdown cancels a scheduled watering). A scanner
+        # left running makes BlueZ reject the next start() with "Operation
+        # already in progress", breaking every Bluetooth call until restart.
+        await scanner.stop()
 
     return found

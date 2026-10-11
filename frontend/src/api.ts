@@ -1,6 +1,6 @@
 export interface Health {
   status: string;
-  scheduler: { running: boolean; jobs: number };
+  scheduler: { is_running: boolean; jobs: number };
 }
 
 export interface Schedule {
@@ -9,19 +9,19 @@ export interface Schedule {
   days: string[];
   time: string;
   minutes: number;
-  enabled: boolean;
+  is_enabled: boolean;
 }
 
-export type ScheduleInput = Omit<Schedule, "id" | "enabled"> & {
-  enabled?: boolean;
+export type ScheduleInput = Omit<Schedule, "id" | "is_enabled"> & {
+  is_enabled?: boolean;
 };
 
 export interface ZoneState {
-  watering: boolean;
+  is_watering: boolean;
   watering_source?: string;
   remaining_minutes?: number;
   ends_at?: string; // ISO local time, e.g. "2026-08-09T11:45:00"
-  schedule: { enabled: boolean; next_run?: string };
+  schedule: { is_enabled: boolean; next_run?: string };
 }
 
 export interface DeviceState {
@@ -80,6 +80,15 @@ export const deleteSchedule = (id: string) =>
   request<void>(`/api/schedules/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+
+// last state the server saw (instant, served from data/last_state.json);
+// state is null until the timer has been read at least once
+export interface CachedState {
+  read_at: string | null; // ISO 8601 with UTC offset
+  state: DeviceState | null;
+}
+
+export const getCachedState = () => request<CachedState>("/api/state/cached");
 
 // slow bluetooth endpoints
 export const getState = () => request<DeviceState>("/api/state");

@@ -21,6 +21,7 @@ _log = logging.getLogger("melnor.ble")
 # A "relative import": the leading dot means "from THIS package (api)".
 # So this grabs scan_for_melnor from api/scan.py.
 from .scan import scan_for_melnor
+from . import state_cache
 
 # Weekday name -> Python weekday number (0=Mon .. 6=Sun). The web layer uses
 # this to validate the incoming day before we touch Bluetooth.
@@ -60,6 +61,15 @@ async def _find_device():
 
 
 _CONNECT_ATTEMPTS = 5
+
+# Errors worth retrying while REACHING the timer (scan, connect, fetch_state).
+# Besides our own TimerNotFound and bleak's BleakError, a link that drops
+# mid-read surfaces as a timeout (TimeoutError, which is an OSError) or an
+# EOFError from the GATT layer. Programming errors (AttributeError, etc.) are
+# deliberately NOT here, so a real bug fails fast instead of being retried
+# five times and disguised as "timer not found". CancelledError is a
+# BaseException, so a cancelled request is never swallowed either.
+_RETRYABLE_CONNECT_ERRORS = (TimerNotFound, BleakError, EOFError, OSError)
 
 
 async def _connect_once():
@@ -110,7 +120,7 @@ async def _connect():
     for attempt in range(1, _CONNECT_ATTEMPTS + 1):
         try:
             return await _connect_once()
-        except (TimerNotFound, BleakError) as error:
+        except _RETRYABLE_CONNECT_ERRORS as error:
             # Remember the failure and try again immediately (no backoff). The
             # 15s scan timeout inside _connect_once() paces the retries for us.
             last_error = error
@@ -125,6 +135,21 @@ async def _connect():
         f"Could not reach the timer after {_CONNECT_ATTEMPTS} attempts. "
         "Is it awake? Is the phone app closed?"
     ) from last_error
+
+
+async def _disconnect_quietly(device):
+    """Disconnect, but never raise.
+
+    By the time a caller's `finally:` runs, the real work (a read, or a valve
+    write that has already opened or closed the valve) is done. If the link
+    has already dropped, disconnect() can raise BleakError; letting that
+    escape would report a watering that actually started as a failure, and
+    the user might press Start again. Log it and move on.
+    """
+    try:
+        await device.disconnect()
+    except Exception:
+        _log.warning("Disconnect after a finished command failed", exc_info=True)
 
 
 def _get_zone(device, zone_number):
@@ -144,13 +169,14 @@ async def water_zone(zone_number, minutes):
         zone.is_watering = True
         zone.manual_watering_minutes = minutes
         await device.push_state()  # writes the change to the timer
+        await _remember_after_command(device, zone_number, minutes)
         return {
             "zone": zone_number,
-            "watering": zone.is_watering,
+            "is_watering": zone.is_watering,
             "minutes": minutes,
         }
     finally:
-        await device.disconnect()
+        await _disconnect_quietly(device)
 
 
 async def turn_off_zone(zone_number):
@@ -164,9 +190,10 @@ async def turn_off_zone(zone_number):
         zone = _get_zone(device, zone_number)
         zone.is_watering = False
         await device.push_state()
-        return {"zone": zone_number, "watering": zone.is_watering}
+        await _remember_after_command(device, zone_number)
+        return {"zone": zone_number, "is_watering": zone.is_watering}
     finally:
-        await device.disconnect()
+        await _disconnect_quietly(device)
 
 
 async def stop_zone(zone_number):
@@ -180,13 +207,14 @@ async def stop_zone(zone_number):
         zone = _get_zone(device, zone_number)
         zone.is_watering = False
         await zone.set_frequency_enabled(False)
+        await _remember_after_command(device, zone_number)
         return {
             "zone": zone_number,
-            "watering": zone.is_watering,
-            "schedule_enabled": zone.schedule_enabled,
+            "is_watering": zone.is_watering,
+            "is_schedule_enabled": zone.schedule_enabled,
         }
     finally:
-        await device.disconnect()
+        await _disconnect_quietly(device)
 
 
 def _is_watering(zone):
@@ -216,10 +244,18 @@ def _watering_remaining(zone):
     else:
         return {}
 
+    return _watering_fields(end_ts, source)
+
+
+def _watering_fields(end_ts, source):
+    """The remaining-time fields for a zone that ends at unix time `end_ts`."""
     remaining = max(int(end_ts - time.time()), 0)
     return {
         "watering_source": source,
-        "ends_at": datetime.fromtimestamp(end_ts).isoformat(timespec="seconds"),
+        # .astimezone() attaches the Pi's UTC offset, so a browser in any
+        # timezone (or a Pi whose timezone was never set) parses the same
+        # instant instead of guessing the wall clock is its own
+        "ends_at": datetime.fromtimestamp(end_ts).astimezone().isoformat(timespec="seconds"),
         "remaining_seconds": remaining,
         "remaining_minutes": round(remaining / 60, 1),
     }
@@ -232,12 +268,12 @@ def _zone_schedule(zone):
     exactly one place (DRY). The web layer turns this dict into JSON.
     """
     if not zone.schedule_enabled:
-        return {"enabled": False}
+        return {"is_enabled": False}
 
     freq = zone.frequency
     next_cycle = zone.next_cycle
     return {
-        "enabled": True,
+        "is_enabled": True,
         # The library warns the DATE is unreliable; the time-of-day
         # and weekday are what we trust.
         "start_time": str(freq.start_time),
@@ -289,14 +325,14 @@ async def set_zone_schedule(zone_number, weekday, hour, minute, minutes):
 
         return {"zone": zone_number, "schedule": _zone_schedule(zone)}
     finally:
-        await device.disconnect()
+        await _disconnect_quietly(device)
 
 
 def _zone_state(zone):
     """Build one zone's live-state dict: watering (manual OR scheduled),
     the remaining-time/source fields when watering, and its schedule."""
     return {
-        "watering": _is_watering(zone),
+        "is_watering": _is_watering(zone),
         # When watering, adds watering_source / ends_at / remaining_*; empty
         # otherwise.
         **_watering_remaining(zone),
@@ -304,24 +340,71 @@ def _zone_state(zone):
     }
 
 
+def _build_state(device):
+    """The full GET /api/state dict for a connected device."""
+    return {
+        "name": device.name,
+        "battery": device.battery_level,
+        "zones": {str(n): _zone_state(_get_zone(device, n)) for n in (1, 2)},
+    }
+
+
+async def _remember(state):
+    """Save `state` to the last-known-state cache (data/last_state.json).
+
+    Runs the disk write on a thread so the fsync can't stall the event loop,
+    and never raises: a failed cache write must not fail the command.
+    """
+    try:
+        await asyncio.to_thread(state_cache.save, state)
+    except Exception:
+        _log.exception("Could not write the state cache")
+
+
+async def _remember_after_command(device, zone_number, minutes=None):
+    """Cache a snapshot right after a valve command. Never raises.
+
+    For an OFF/STOP (`minutes` is None) the device object already reflects
+    the write, so the snapshot is taken as-is. That matters for OFF: it only
+    cancels MANUAL watering, so a zone mid-way through its on-device schedule
+    correctly stays "watering (scheduled)" instead of being marked idle.
+
+    For an ON, the device doesn't report the new countdown until a later read
+    (its end-time register fills in a moment after the write), so we patch the
+    zone as manual watering ending at now + minutes. The next real read
+    overwrites this with the device's own numbers.
+
+    The valve command has already succeeded by the time this runs, so any
+    failure here is logged and swallowed rather than failing the request.
+    """
+    try:
+        state = _build_state(device)
+        if minutes:
+            zone = state["zones"][str(zone_number)]
+            zone["is_watering"] = True
+            zone.update(_watering_fields(time.time() + minutes * 60, "manual"))
+        await _remember(state)
+    except Exception:
+        _log.exception("Could not snapshot state after zone %s command", zone_number)
+
+
 async def get_state():
     """Return battery + each zone's live watering status AND its schedule.
 
     One connection gets the whole picture (mirrors the CLI `state` command),
-    which matters because each call is a full ~15s scan/connect cycle.
+    which matters because each call is a full ~15s scan/connect cycle. The
+    result is also saved to the state cache for GET /api/state/cached.
     """
     device = await _connect()
     try:
-        return {
-            "name": device.name,
-            "battery": device.battery_level,
-            "zones": {str(n): _zone_state(_get_zone(device, n)) for n in (1, 2)},
-        }
+        state = _build_state(device)
+        await _remember(state)
+        return state
     finally:
         # `finally` runs whether the code above succeeded or raised, so we
         # never leave the Bluetooth connection open (which would block the
         # phone app and the next request).
-        await device.disconnect()
+        await _disconnect_quietly(device)
 
 
 async def get_schedule():
@@ -331,4 +414,4 @@ async def get_schedule():
         zones = {str(n): _zone_schedule(_get_zone(device, n)) for n in (1, 2)}
         return {"zones": zones}
     finally:
-        await device.disconnect()
+        await _disconnect_quietly(device)

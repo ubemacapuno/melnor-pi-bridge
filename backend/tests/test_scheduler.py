@@ -47,7 +47,7 @@ def test_arms_enabled_schedule(schedules_file):
 
 
 def test_skips_disabled_schedule(schedules_file):
-    store.add_schedule(1, ["mon"], "21:00", 20, enabled=False)
+    store.add_schedule(1, ["mon"], "21:00", 20, is_enabled=False)
     assert _reload_and_inspect() == []
 
 
@@ -55,8 +55,8 @@ def test_skips_malformed_record_but_arms_good_one(schedules_file):
     # Write the file directly so we can plant a BAD record (add_schedule would
     # reject it). "9am" is not HH:MM, so arming this one raises, but the good
     # one must still be armed and the server must not crash.
-    good = {"id": "good", "zone": 1, "days": ["mon"], "time": "21:00", "minutes": 20, "enabled": True}
-    bad = {"id": "bad", "zone": 2, "days": ["tue"], "time": "9am", "minutes": 10, "enabled": True}
+    good = {"id": "good", "zone": 1, "days": ["mon"], "time": "21:00", "minutes": 20, "is_enabled": True}
+    bad = {"id": "bad", "zone": 2, "days": ["tue"], "time": "9am", "minutes": 10, "is_enabled": True}
     schedules_file.write_text(json.dumps([good, bad]))
 
     armed = _reload_and_inspect()

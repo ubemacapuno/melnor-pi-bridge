@@ -52,7 +52,7 @@ def reload_jobs():
         # hand-edited "time": "9am", or a missing field) is skipped and logged,
         # instead of aborting the loop and leaving every LATER schedule unarmed.
         try:
-            if not sched.get("enabled", True):
+            if not sched.get("is_enabled", True):
                 continue  # keep it in the file, but don't arm it
 
             hour, minute = sched["time"].split(":")
@@ -108,5 +108,5 @@ def status():
     Both come from in-memory state, so this is instant and never touches BLE.
     """
     if _scheduler is None:
-        return {"running": False, "jobs": 0}
-    return {"running": _scheduler.running, "jobs": len(_scheduler.get_jobs())}
+        return {"is_running": False, "jobs": 0}
+    return {"is_running": _scheduler.running, "jobs": len(_scheduler.get_jobs())}

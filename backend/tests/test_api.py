@@ -32,7 +32,7 @@ def test_create_returns_200_and_echoes(client):
     body = r.json()
     assert body["id"]                      # a generated id came back
     assert body["days"] == ["mon", "wed"]
-    assert body["enabled"] is True         # defaulted
+    assert body["is_enabled"] is True         # defaulted
 
 
 def test_list_returns_added(client):
@@ -99,3 +99,47 @@ def test_health_ok(client):
     body = r.json()
     assert body["status"] == "ok"
     assert "scheduler" in body
+
+
+# --- weekday / time validation shared by both schedule endpoints ------------
+
+@pytest.mark.parametrize("day", ["monkey", "sunshine", "mo", ""])
+def test_prefix_lookalike_weekdays_422(client, day):
+    assert client.post("/api/schedules", json={**VALID, "days": [day]}).status_code == 422
+
+
+def test_full_day_names_normalized(client):
+    r = client.post("/api/schedules", json={**VALID, "days": ["Monday", " WED "]})
+    assert r.status_code == 200
+    assert r.json()["days"] == ["mon", "wed"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"weekday": "monkey", "time": "21:00"},
+        {"weekday": "mon", "time": "9am"},
+        {"weekday": "mon", "time": "25:00"},
+        {"weekday": "mon", "time": "21:00:00"},
+    ],
+)
+def test_onboard_schedule_validation_422_before_bluetooth(client, monkeypatch, params):
+    async def must_not_run(*args, **kwargs):
+        raise AssertionError("Bluetooth should not be touched for bad input")
+    monkeypatch.setattr(main.melnor, "set_zone_schedule", must_not_run)
+
+    r = client.post("/api/zones/1/schedule", params={**params, "minutes": 20})
+    assert r.status_code == 422
+
+
+def test_onboard_schedule_passes_parsed_values(client, monkeypatch):
+    seen = {}
+
+    async def fake(zone, weekday, hour, minute, minutes):
+        seen.update(zone=zone, weekday=weekday, hour=hour, minute=minute, minutes=minutes)
+        return {"zone": zone}
+    monkeypatch.setattr(main.melnor, "set_zone_schedule", fake)
+
+    r = client.post("/api/zones/2/schedule", params={"weekday": "Thursday", "time": "19:05", "minutes": 30})
+    assert r.status_code == 200
+    assert seen == {"zone": 2, "weekday": 3, "hour": 19, "minute": 5, "minutes": 30}
