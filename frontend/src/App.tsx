@@ -8,7 +8,7 @@ import {
   type DeviceState,
 } from "./api";
 import HealthPill from "./components/HealthPill";
-import StatusCard from "./components/StatusCard";
+import StatusCard, { type StatusSource } from "./components/StatusCard";
 import ManualWatering from "./components/ManualWatering";
 import ScheduleList from "./components/ScheduleList";
 import AddScheduleForm from "./components/AddScheduleForm";
@@ -29,12 +29,16 @@ export default function App() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
   const [statusUpdatedAt, setStatusUpdatedAt] = useState<Date | null>(null);
-  const [bleBusy, setBleBusy] = useState(false);
+  // "cached" = loaded from the server's last-known snapshot on page open;
+  // "live" = read from the timer during this session
+  const [statusSource, setStatusSource] = useState<StatusSource | null>(null);
+  const [isBleBusy, setIsBleBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(() => {
     loadHealth();
     loadSchedules();
+    loadCachedState();
   }, []);
 
   // show a notice with the current time
@@ -53,6 +57,22 @@ export default function App() {
       .catch(() => setHealth(null));
   }
 
+  // the server remembers the last timer read in data/last_state.json, so
+  // every client (phone, laptop, a fresh tab) opens with the latest known
+  // status and countdown instead of a blank card; no Bluetooth involved
+  async function loadCachedState() {
+    try {
+      const cached = await api.getCachedState();
+      if (cached.state && cached.read_at) {
+        setDeviceState(cached.state);
+        setStatusUpdatedAt(new Date(cached.read_at));
+        setStatusSource("cached");
+      }
+    } catch (err) {
+      console.warn("cached state load failed:", err);
+    }
+  }
+
   async function loadSchedules() {
     try {
       setSchedules(await api.getSchedules());
@@ -66,7 +86,7 @@ export default function App() {
     action: () => Promise<T>,
     onSuccess?: (result: T) => void,
   ) {
-    setBleBusy(true);
+    setIsBleBusy(true);
     setNotice(null);
     try {
       const result = await action();
@@ -74,7 +94,7 @@ export default function App() {
     } catch (err) {
       notify("error", errorMessage(err));
     } finally {
-      setBleBusy(false);
+      setIsBleBusy(false);
     }
   }
 
@@ -82,6 +102,7 @@ export default function App() {
   function applyState(state: DeviceState) {
     setDeviceState(state);
     setStatusUpdatedAt(new Date());
+    setStatusSource("live");
   }
 
   async function readStatus() {
@@ -159,11 +180,12 @@ export default function App() {
         <StatusCard
           state={deviceState}
           updatedAt={statusUpdatedAt}
-          busy={bleBusy}
+          source={statusSource}
+          isBusy={isBleBusy}
           onRefresh={refreshStatus}
         />
 
-        <ManualWatering busy={bleBusy} onStart={startZone} onStop={stopZone} />
+        <ManualWatering isBusy={isBleBusy} onStart={startZone} onStop={stopZone} />
 
         <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">

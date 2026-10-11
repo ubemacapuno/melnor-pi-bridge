@@ -8,20 +8,53 @@ One schedule looks like:
         "days": ["mon", "wed", "sat"],  # any subset of mon..sun
         "time": "21:00",                # 24-hour HH:MM, local time
         "minutes": 20,                  # how long to water
-        "enabled": true                 # false = keep it, but don't arm it
+        "is_enabled": true              # false = keep it, but don't arm it
     }
 """
 
 import json
 import logging
 import os
+import shutil
+import threading
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 log = logging.getLogger("melnor.store")
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _SCHEDULES_PATH = _DATA_DIR / "schedules.json"
+
+# Serializes every read-modify-write of schedules.json. main.py runs
+# add_schedule / delete_schedule on worker threads (asyncio.to_thread), so two
+# requests close together (two tabs, a double-click) could otherwise both load
+# the file, both pass the overlap check, and the second save would silently
+# drop the first schedule. A threading lock (not asyncio) because the callers
+# are threads. Reentrant so a locked function can call another locked one.
+_lock = threading.RLock()
+
+
+class _Unreadable(Exception):
+    """schedules.json exists but isn't a readable JSON list."""
+
+
+def _read_file():
+    """Return the parsed list from schedules.json, [] if the file is missing.
+
+    Raises _Unreadable for a corrupt file (bad JSON, I/O error, or valid JSON
+    that isn't a list, e.g. `{}`).
+    """
+    if not _SCHEDULES_PATH.exists():
+        return []
+    try:
+        with open(_SCHEDULES_PATH, "r") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as error:
+        raise _Unreadable(str(error)) from error
+    if not isinstance(data, list):
+        raise _Unreadable(f"expected a JSON list, got {type(data).__name__}")
+    return data
 
 
 def load_schedules():
@@ -34,15 +67,42 @@ def load_schedules():
     and break every schedule endpoint. Returning [] keeps the server alive; the
     error in the log tells you to go fix the file.
     """
-    if not _SCHEDULES_PATH.exists():
-        return []
-    # Read the file and turn its JSON text back into Python lists/dicts.
     try:
-        with open(_SCHEDULES_PATH, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
+        schedules = _read_file()
+    except _Unreadable:
         log.exception("Could not read %s, treating as empty", _SCHEDULES_PATH)
         return []
+    return [_migrate(s) for s in schedules]
+
+
+def _migrate(sched):
+    """Upgrade a schedule record written by an older version in place.
+
+    The flag used to be called `enabled`; it's `is_enabled` now. A file saved
+    before the rename still loads, and the next save writes the new name.
+    """
+    if isinstance(sched, dict) and "enabled" in sched and "is_enabled" not in sched:
+        sched["is_enabled"] = sched.pop("enabled")
+    return sched
+
+
+def _backup_if_unreadable():
+    """If schedules.json exists but can't be parsed, copy it to
+    schedules.json.corrupt-YYYYMMDD-HHMMSS before it gets overwritten.
+    Returns the backup path, or None if no backup was needed."""
+    try:
+        _read_file()
+        return None
+    except _Unreadable:
+        pass
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = _SCHEDULES_PATH.with_name(f"{_SCHEDULES_PATH.name}.corrupt-{stamp}")
+    shutil.copy2(_SCHEDULES_PATH, backup)
+    log.error(
+        "%s was unreadable; saved a copy to %s before overwriting it",
+        _SCHEDULES_PATH, backup,
+    )
+    return backup
 
 
 def save_schedules(schedules):
@@ -57,6 +117,11 @@ def save_schedules(schedules):
     """
     # backend/data/ is gitignored and may not exist yet on a fresh checkout.
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # A corrupt file loads as [] (see load_schedules), so the first save after
+    # that would replace it with just the new record and the originals would
+    # be gone for good. Copy it aside first so it can be repaired by hand.
+    _backup_if_unreadable()
 
     # Write the temp file in the SAME folder, so os.replace stays on one disk
     # (a rename across disks isn't atomic).
@@ -122,15 +187,23 @@ def find_conflict(candidate):
     None. Overlap is checked across ALL zones (two zones running at once drops
     the water pressure). Only ENABLED schedules count, a paused schedule never
     fires, so it can't clash and a paused candidate conflicts with nothing."""
-    if not candidate.get("enabled", True):
+    if not candidate.get("is_enabled", True):
         return None  # a schedule that won't fire can't clash with anything
 
     candidate_windows = _weekly_intervals(candidate)
     for other in load_schedules():
-        if not other.get("enabled", True):
+        if not isinstance(other, dict) or not other.get("is_enabled", True):
+            continue
+        try:
+            other_windows = _weekly_intervals(other)
+        except (KeyError, ValueError, TypeError, AttributeError):
+            # A hand-edited record like "time": "9am" or days: ["monday"].
+            # The scheduler skips it too (it never fires), so it can't clash;
+            # skipping keeps one bad record from 500-ing every create.
+            log.warning("Skipping unusable schedule record in overlap check: %r", other)
             continue
         for cw in candidate_windows:
-            if any(_ranges_overlap(cw, ow) for ow in _weekly_intervals(other)):
+            if any(_ranges_overlap(cw, ow) for ow in other_windows):
                 return other
     return None
 
@@ -144,7 +217,7 @@ def _conflict_message(conflict):
     )
 
 
-def add_schedule(zone, days, time, minutes, enabled=True):
+def add_schedule(zone, days, time, minutes, is_enabled=True):
     """Create one schedule, save it, and return the new schedule dict.
 
     Raises ScheduleConflict if it would overlap an existing enabled schedule (in
@@ -155,24 +228,33 @@ def add_schedule(zone, days, time, minutes, enabled=True):
         "days": days,
         "time": time,
         "minutes": minutes,
-        "enabled": enabled,
+        "is_enabled": is_enabled,
     }
-    conflict = find_conflict(new_schedule)
-    if conflict is not None:
-        raise ScheduleConflict(_conflict_message(conflict))
+    # Check-then-write must be atomic, or two concurrent adds can both pass
+    # the overlap check (see _lock).
+    with _lock:
+        conflict = find_conflict(new_schedule)
+        if conflict is not None:
+            raise ScheduleConflict(_conflict_message(conflict))
 
-    schedules = load_schedules()
-    schedules.append(new_schedule)
-    save_schedules(schedules)
+        schedules = load_schedules()
+        schedules.append(new_schedule)
+        save_schedules(schedules)
     return new_schedule
 
 
 def delete_schedule(schedule_id):
     """Remove the schedule with this id. Return True if one was actually removed."""
-    schedules = load_schedules()
-    # Keep every schedule EXCEPT the one whose id matches (a list comprehension).
-    remaining = [s for s in schedules if s["id"] != schedule_id]
-    if len(remaining) == len(schedules):
-        return False  # nothing matched that id
-    save_schedules(remaining)
+    with _lock:
+        schedules = load_schedules()
+        # Keep every schedule EXCEPT the one whose id matches (a list comprehension).
+        # isinstance guard: a junk entry (e.g. a bare string) is kept as-is
+        # rather than crashing the delete with a TypeError.
+        remaining = [
+            s for s in schedules
+            if not (isinstance(s, dict) and s.get("id") == schedule_id)
+        ]
+        if len(remaining) == len(schedules):
+            return False  # nothing matched that id
+        save_schedules(remaining)
     return True

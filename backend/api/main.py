@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 # Relative imports: bring in our logic layer (melnor.py), the schedule store
 # (store.py), and the Pi-side scheduler (scheduler.py).
-from . import melnor, store, scheduler
+from . import melnor, store, scheduler, state_cache
 
 # Make OUR logs visible in the console. Everything in this app logs under the
 # "melnor" name (e.g. "melnor.scheduler"). uvicorn only sets up its own
@@ -62,6 +62,19 @@ async def read_state():
             # Turn our custom error into a clean HTTP 503 (Service Unavailable)
             # with a readable message, instead of a 500 "Internal Server Error".
             raise HTTPException(status_code=503, detail=str(error))
+
+
+@app.get("/api/state/cached")
+async def read_cached_state():
+    """The last state we saw, WITHOUT touching Bluetooth (instant).
+
+    Served from data/last_state.json, which melnor.py rewrites after every
+    successful read or valve command (web or scheduler). Any client can load
+    it on page open and count down from each zone's `ends_at`. Returns
+    {"read_at": null, "state": null} until the timer has been read once.
+    """
+    cached = await asyncio.to_thread(state_cache.load)
+    return cached or {"read_at": None, "state": None}
 
 
 @app.get("/api/schedule")
@@ -134,23 +147,10 @@ async def set_zone_schedule(
     minutes: int = Query(ge=1, le=360),
 ):
     """Set a WEEKLY schedule: water `zone` every `weekday` at `time` for `minutes`."""
-    # Validate weekday and time HERE so bad input is a clean 422 before we
-    # ever open the (slow) Bluetooth connection.
-    day = weekday.strip().lower()[:3]
-    if day not in melnor.WEEKDAYS:
-        raise HTTPException(
-            status_code=422, detail="weekday must be one of mon, tue, wed, thu, fri, sat, sun."
-        )
-    try:
-        hour, minute = (int(part) for part in time.split(":"))
-    except ValueError:
-        raise HTTPException(
-            status_code=422, detail="time must be HH:MM in 24-hour format, e.g. 21:00."
-        )
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        raise HTTPException(
-            status_code=422, detail="time must be a valid 24-hour HH:MM, e.g. 21:00."
-        )
+    # Validate HERE so bad input is a clean 422 before we ever open the (slow)
+    # Bluetooth connection. Same validators as the Pi-side schedules below.
+    day = _validate_weekday(weekday)
+    hour, minute = _validate_time(time)
 
     async with melnor.ble_lock:
         try:
@@ -183,25 +183,41 @@ class ScheduleCreate(BaseModel):
     days: list[str]
     time: str = Field(description="24-hour HH:MM, e.g. 21:00")
     minutes: int = Field(ge=1, le=_MAX_SCHEDULE_MINUTES)
-    enabled: bool = True
+    is_enabled: bool = True
+
+
+# Full names map to the 3-letter keys; anything else (e.g. "monkey", which
+# used to slip through as "mon" via a [:3] slice) is rejected.
+_FULL_DAY_NAMES = {
+    "monday": "mon", "tuesday": "tue", "wednesday": "wed", "thursday": "thu",
+    "friday": "fri", "saturday": "sat", "sunday": "sun",
+}
+
+
+def _validate_weekday(value):
+    """Normalize one weekday ("mon" or "monday", any case) to its 3-letter key,
+    or raise HTTP 422."""
+    day = value.strip().lower()
+    day = _FULL_DAY_NAMES.get(day, day)
+    if day not in melnor.WEEKDAYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"'{value}' is not a weekday (use mon..sun).",
+        )
+    return day
 
 
 def _validate_days(days):
     """Normalize + check a list of weekday names; raise HTTP 422 if any is bad.
     Returns the cleaned list (lowercased, 3-letter, e.g. ["mon", "wed"])."""
-    normalized = [d.strip().lower()[:3] for d in days]
-    if not normalized:
+    if not days:
         raise HTTPException(status_code=422, detail="days must list at least one weekday.")
-    for d in normalized:
-        if d not in melnor.WEEKDAYS:
-            raise HTTPException(
-                status_code=422, detail=f"'{d}' is not a weekday (use mon..sun)."
-            )
-    return normalized
+    return [_validate_weekday(d) for d in days]
 
 
 def _validate_time(value):
-    """Check a 24-hour HH:MM string; raise HTTP 422 if it's not valid."""
+    """Check a 24-hour HH:MM string; raise HTTP 422 if it's not valid.
+    Returns (hour, minute)."""
     try:
         hour, minute = (int(p) for p in value.split(":"))
     except ValueError:
@@ -212,6 +228,7 @@ def _validate_time(value):
         raise HTTPException(
             status_code=422, detail="time must be a valid 24-hour HH:MM, e.g. 21:00."
         )
+    return hour, minute
 
 
 @app.get("/api/schedules")
@@ -232,7 +249,7 @@ async def create_schedule(body: ScheduleCreate):
     # store.add_schedule rejects overlaps by raising ScheduleConflict -> 409.
     try:
         created = await asyncio.to_thread(
-            store.add_schedule, body.zone, days, body.time, body.minutes, body.enabled
+            store.add_schedule, body.zone, days, body.time, body.minutes, body.is_enabled
         )
     except store.ScheduleConflict as error:
         raise HTTPException(status_code=409, detail=str(error))

@@ -119,8 +119,24 @@ instant and work even when the timer is asleep (no `503`):
 
 | Method | Path              | Does                                               |
 | ------ | ----------------- | -------------------------------------------------- |
-| GET    | `/api/health`     | Liveness + scheduler status; no Bluetooth (see §7) |
-| GET    | `/docs`, `/redoc` | Interactive API docs                               |
+| GET    | `/api/health`       | Liveness + scheduler status; no Bluetooth (see §7)  |
+| GET    | `/api/state/cached` | Last known timer state; no Bluetooth (see below)    |
+| GET    | `/docs`, `/redoc`   | Interactive API docs                                |
+
+**Last-known state cache.** Every successful `/api/state` read and every valve
+command (web **or** scheduler-fired) writes a snapshot to `data/last_state.json`.
+`GET /api/state/cached` returns it instantly as
+`{"read_at": "<ISO 8601 with offset>", "state": {...same shape as /api/state...}}`,
+or `{"read_at": null, "state": null}` before the first read. Because it lives
+on the Pi, every client (phone, laptop, a fresh tab) opens with the same last
+known status, and the UI counts down from each zone's `ends_at` without
+touching Bluetooth. After an `on`/`off`, the snapshot is patched with the
+commanded zone (`ends_at` = now + minutes), since the device doesn't report
+its own countdown until the next read. After an `off`, the snapshot is taken
+straight from the device, so a zone still running its **on-device** schedule
+stays "watering (scheduled)" rather than flipping to idle. `ends_at` and
+`read_at` both carry a UTC offset, so the countdown is right even if the
+phone and the Pi are in different timezones.
 
 #### Two kinds of "schedule"
 
@@ -139,13 +155,13 @@ instant and work even when the timer is asleep (no `503`):
   "days": ["mon", "wed", "sat"],
   "time": "21:00",
   "minutes": 20,
-  "enabled": true
+  "is_enabled": true
 }
 ```
 
 - `zone` is `1`-`2`; `days` is any of `mon`-`sun`; `time` is 24-hour `HH:MM`
   (local time); `minutes` is `1`-`240` (a scheduled run is capped at 4 hours).
-  `enabled` is optional and defaults to `true` (`false` keeps the schedule saved
+  `is_enabled` is optional and defaults to `true` (`false` keeps the schedule saved
   but doesn't arm it). Bad values → `422`.
 - The response echoes the created schedule including a generated `id`; pass that
   `id` to `DELETE /api/schedules/{id}`.
@@ -156,7 +172,7 @@ with). Two schedules clash when they're on the **same zone**, share a weekday,
 and their watering windows (`time` … `time + minutes`) overlap, the check
 handles runs that cross midnight or the week boundary. Different zones never
 clash, back-to-back runs (one ends as the next begins) are fine, and a
-**disabled** (`enabled:false`) schedule is ignored.
+**disabled** (`is_enabled:false`) schedule is ignored.
 
 Deleting an unknown `id` returns `404`.
 
@@ -185,20 +201,20 @@ off. The `schedule` block always shows the configured schedule regardless.
   "battery": 100,
   "zones": {
     "1": {
-      "watering": true,
+      "is_watering": true,
       "watering_source": "scheduled",
-      "ends_at": "2026-07-23T23:00:00",
+      "ends_at": "2026-07-23T23:00:00-05:00",
       "remaining_seconds": 7200,
       "remaining_minutes": 120.0,
       "schedule": {
-        "enabled": true,
+        "is_enabled": true,
         "start_time": "19:00:00",
         "interval_hours": 168,
         "duration_minutes": 240,
         "next_run": "Thursday 19:00"
       }
     },
-    "2": { "watering": false, "schedule": { "enabled": false } }
+    "2": { "is_watering": false, "schedule": { "is_enabled": false } }
   }
 }
 ```
@@ -448,7 +464,7 @@ touch Bluetooth (so it won't fail just because the timer is asleep):
 
 ```bash
 curl http://<pi>:8000/api/health
-# {"status":"ok","scheduler":{"running":true,"jobs":2}}
+# {"status":"ok","scheduler":{"is_running":true,"jobs":2}}
 ```
 
 `jobs` is how many alarms are armed, compare it to your count of _enabled_

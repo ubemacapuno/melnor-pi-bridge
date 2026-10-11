@@ -24,7 +24,7 @@ export default function AddScheduleForm({
   const [time, setTime] = useState("21:00");
   const [minutes, setMinutes] = useState(20);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   function toggleDay(value: string) {
     setDays((prev) =>
@@ -53,14 +53,14 @@ export default function AddScheduleForm({
 
     const orderedDays = DAY_ORDER.filter((d) => days.includes(d));
 
-    setSubmitting(true);
+    setIsSubmitting(true);
     try {
       await onAdd({ zone, days: orderedDays, time, minutes });
       setDays([]);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   }
 
@@ -89,7 +89,7 @@ export default function AddScheduleForm({
         <label className="w-14 text-sm text-slate-400">Days</label>
         <div className="flex flex-wrap gap-1">
           {DAYS.map(([value, label]) => {
-            const on = days.includes(value);
+            const isSelected = days.includes(value);
             return (
               <button
                 type="button"
@@ -97,7 +97,7 @@ export default function AddScheduleForm({
                 onClick={() => toggleDay(value)}
                 className={
                   "cursor-pointer h-8 w-9 rounded-md text-xs font-medium " +
-                  (on
+                  (isSelected
                     ? "bg-emerald-600 text-white"
                     : "bg-slate-800 text-slate-300 hover:bg-slate-700")
                 }
@@ -137,10 +137,10 @@ export default function AddScheduleForm({
         </p>
         <button
           type="submit"
-          disabled={submitting}
+          disabled={isSubmitting}
           className="cursor-pointer rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium hover:bg-emerald-500 disabled:opacity-40"
         >
-          {submitting ? "Adding…" : "Add"}
+          {isSubmitting ? "Adding…" : "Add"}
         </button>
       </div>
     </form>
