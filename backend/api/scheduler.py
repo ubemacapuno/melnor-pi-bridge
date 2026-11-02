@@ -2,12 +2,14 @@
 Scheduler logic: fires each watering schedule at the right time.
 """
 
+import asyncio
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from . import melnor
+from . import rain_delay
 from . import store
 
 log = logging.getLogger("melnor.scheduler")
@@ -25,6 +27,16 @@ async def _fire(schedule_id, zone, minutes):
     scheduler and silently killing every future job. We log the schedule_id so
     that when several schedules share a zone you can tell which one fired.
     """
+    # Checked at fire time rather than by disarming jobs, so a delay ends on
+    # its own when the clock passes `until` with nothing to re-arm.
+    delay = await asyncio.to_thread(rain_delay.status)
+    if delay["is_active"]:
+        log.info(
+            "Schedule %s skipped: rain delay until %s (zone %s, %s min)",
+            schedule_id, delay["until"], zone, minutes,
+        )
+        return
+
     log.info("Schedule %s firing: zone %s for %s min", schedule_id, zone, minutes)
     try:
         async with melnor.ble_lock:  # wait our turn on the Bluetooth connection
