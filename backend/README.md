@@ -114,6 +114,17 @@ instant and work even when the timer is asleep (no `503`):
 | GET    | `/api/schedules`      | List every saved Pi-side schedule       |
 | POST   | `/api/schedules`      | Add a schedule (JSON body, see below)   |
 | DELETE | `/api/schedules/{id}` | Delete a schedule by its generated `id` |
+| GET    | `/api/rain-delay`     | `{"is_active": bool, "until": ISO or null}` |
+| POST   | `/api/rain-delay`     | Pause all scheduled runs for 24 hours   |
+| DELETE | `/api/rain-delay`     | Cancel the rain delay now               |
+
+**Rain delay.** While active, every Pi-side schedule that comes due is skipped
+(logged as `skipped: rain delay`) instead of opening the valve. It's stored in
+`data/rain_delay.json` as an end time, so it survives restarts and ends on its
+own after 24 hours. Pressing it again restarts the 24 hours from now. Manual
+watering is not blocked. It **can't** pause an on-device schedule (one
+programmed into the timer itself), because the timer has no rain-delay command
+over Bluetooth.
 
 **Server:**
 

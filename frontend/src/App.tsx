@@ -6,10 +6,12 @@ import {
   type Schedule,
   type ScheduleInput,
   type DeviceState,
+  type RainDelay,
 } from "./api";
 import HealthPill from "./components/HealthPill";
 import StatusCard, { type StatusSource } from "./components/StatusCard";
 import ManualWatering from "./components/ManualWatering";
+import RainDelayCard from "./components/RainDelayCard";
 import ScheduleList from "./components/ScheduleList";
 import AddScheduleForm from "./components/AddScheduleForm";
 
@@ -34,11 +36,14 @@ export default function App() {
   const [statusSource, setStatusSource] = useState<StatusSource | null>(null);
   const [isBleBusy, setIsBleBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [rainDelay, setRainDelay] = useState<RainDelay | null>(null);
+  const [isRainDelaySaving, setIsRainDelaySaving] = useState(false);
 
   useEffect(() => {
     loadHealth();
     loadSchedules();
     loadCachedState();
+    loadRainDelay();
   }, []);
 
   // show a notice with the current time
@@ -134,6 +139,35 @@ export default function App() {
     });
   }
 
+  async function loadRainDelay() {
+    try {
+      setRainDelay(await api.getRainDelay());
+    } catch (err) {
+      console.warn("rain delay load failed:", err);
+    }
+  }
+
+  // rain delay is enforced on the Pi, so it's instant and never waits on bluetooth
+  async function changeRainDelay(isStarting: boolean) {
+    setIsRainDelaySaving(true);
+    try {
+      const result = isStarting
+        ? await api.startRainDelay()
+        : await api.cancelRainDelay();
+      setRainDelay(result);
+      notify(
+        "info",
+        isStarting
+          ? "Rain delay on: scheduled runs paused for 24 hours."
+          : "Rain delay cancelled: schedules resume.",
+      );
+    } catch (err) {
+      notify("error", `Rain delay failed: ${errorMessage(err)}`);
+    } finally {
+      setIsRainDelaySaving(false);
+    }
+  }
+
   // add/deleteSchedule doesn't require bluetooth
   async function addSchedule(body: ScheduleInput): Promise<Schedule> {
     const created = await api.addSchedule(body);
@@ -186,6 +220,14 @@ export default function App() {
         />
 
         <ManualWatering isBusy={isBleBusy} onStart={startZone} onStop={stopZone} />
+
+        <RainDelayCard
+          rainDelay={rainDelay}
+          isSaving={isRainDelaySaving}
+          onStart={() => changeRainDelay(true)}
+          onCancel={() => changeRainDelay(false)}
+          onExpire={loadRainDelay}
+        />
 
         <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">

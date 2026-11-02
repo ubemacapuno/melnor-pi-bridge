@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 # Relative imports: bring in our logic layer (melnor.py), the schedule store
 # (store.py), and the Pi-side scheduler (scheduler.py).
-from . import melnor, store, scheduler, state_cache
+from . import melnor, rain_delay, store, scheduler, state_cache
 
 # Make OUR logs visible in the console. Everything in this app logs under the
 # "melnor" name (e.g. "melnor.scheduler"). uvicorn only sets up its own
@@ -75,6 +75,30 @@ async def read_cached_state():
     """
     cached = await asyncio.to_thread(state_cache.load)
     return cached or {"read_at": None, "state": None}
+
+
+# --- Rain delay -----------------------------------------------------------
+#
+# Pauses every Pi-side schedule for 24 hours (see rain_delay.py). No Bluetooth
+# involved, so these are instant and work even when the timer is unreachable.
+
+
+@app.get("/api/rain-delay")
+async def read_rain_delay():
+    """{"is_active": bool, "until": ISO time or null}."""
+    return await asyncio.to_thread(rain_delay.status)
+
+
+@app.post("/api/rain-delay")
+async def start_rain_delay():
+    """Skip all scheduled runs for the next 24 hours (restarts if active)."""
+    return await asyncio.to_thread(rain_delay.start)
+
+
+@app.delete("/api/rain-delay")
+async def cancel_rain_delay():
+    """End the rain delay now; schedules resume at their next time."""
+    return await asyncio.to_thread(rain_delay.cancel)
 
 
 @app.get("/api/schedule")

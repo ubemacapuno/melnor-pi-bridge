@@ -81,6 +81,20 @@ export const deleteSchedule = (id: string) =>
     method: "DELETE",
   });
 
+// rain delay: pauses every scheduled run for 24 hours (no bluetooth)
+export interface RainDelay {
+  is_active: boolean;
+  until: string | null; // ISO 8601 with UTC offset; null when inactive
+}
+
+export const getRainDelay = () => request<RainDelay>("/api/rain-delay");
+
+export const startRainDelay = () =>
+  request<RainDelay>("/api/rain-delay", { method: "POST" });
+
+export const cancelRainDelay = () =>
+  request<RainDelay>("/api/rain-delay", { method: "DELETE" });
+
 // last state the server saw (instant, served from data/last_state.json);
 // state is null until the timer has been read at least once
 export interface CachedState {
